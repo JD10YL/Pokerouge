@@ -19,12 +19,7 @@ export class LoadingScene extends SceneBase {
   }
 
   preload() {
-    const indexFile = Array.from(document.querySelectorAll('script')).map(s => s.src).find(s => /\/index/.test(s));
-    if (indexFile) {
-      const buildIdMatch = /index\-(.*?)\.js$/.exec(indexFile);
-      if (buildIdMatch)
-        this.load['cacheBuster'] = buildIdMatch[1];
-    }
+    this.load['manifest'] = this.game['manifest'];
 
     if (!isMobile())
       this.load.video('intro_dark', 'images/intro_dark.mp4', true);
@@ -44,15 +39,21 @@ export class LoadingScene extends SceneBase {
     }
     this.loadAtlas('namebox', 'ui');
     this.loadImage('pbinfo_player', 'ui');
+    this.loadImage('pbinfo_player_stats', 'ui');
     this.loadImage('pbinfo_player_mini', 'ui');
+    this.loadImage('pbinfo_player_mini_stats', 'ui');
     this.loadAtlas('pbinfo_player_type', 'ui');
     this.loadAtlas('pbinfo_player_type1', 'ui');
     this.loadAtlas('pbinfo_player_type2', 'ui');
     this.loadImage('pbinfo_enemy_mini', 'ui');
+    this.loadImage('pbinfo_enemy_mini_stats', 'ui');
     this.loadImage('pbinfo_enemy_boss', 'ui');
+    this.loadImage('pbinfo_enemy_boss_stats', 'ui');
     this.loadAtlas('pbinfo_enemy_type', 'ui');
     this.loadAtlas('pbinfo_enemy_type1', 'ui');
     this.loadAtlas('pbinfo_enemy_type2', 'ui');
+    this.loadAtlas('pbinfo_stat', 'ui');
+    this.loadAtlas('pbinfo_stat_numbers', 'ui');
     this.loadImage('overlay_lv', 'ui');
     this.loadAtlas('numbers', 'ui');
     this.loadAtlas('numbers_red', 'ui');
@@ -67,7 +68,11 @@ export class LoadingScene extends SceneBase {
     this.loadImage('achv_bar_3', 'ui');
     this.loadImage('achv_bar_4', 'ui');
     this.loadImage('shiny_star', 'ui', 'shiny.png');
+    this.loadImage('shiny_star_1', 'ui', 'shiny_1.png');
+    this.loadImage('shiny_star_2', 'ui', 'shiny_2.png');
     this.loadImage('shiny_star_small', 'ui', 'shiny_small.png');
+    this.loadImage('shiny_star_small_1', 'ui', 'shiny_small_1.png');
+    this.loadImage('shiny_star_small_2', 'ui', 'shiny_small_2.png');
     this.loadImage('ha_capsule', 'ui', 'ha_capsule.png');
     this.loadImage('icon_spliced', 'ui');
     this.loadImage('icon_tera', 'ui');

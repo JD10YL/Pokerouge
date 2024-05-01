@@ -1,10 +1,10 @@
 import { Arena } from "../field/arena";
 import { Type } from "./type";
 import * as Utils from "../utils";
-import { MoveCategory, StatChangeAttr, allMoves } from "./move";
+import { MoveCategory, allMoves } from "./move";
 import { getPokemonMessage } from "../messages";
 import Pokemon, { HitResult, PokemonMove } from "../field/pokemon";
-import { MoveEffectPhase, StatChangePhase } from "../phases";
+import { MoveEffectPhase, PokemonHealPhase, StatChangePhase} from "../phases";
 import { StatusEffect } from "./status-effect";
 import { BattlerIndex } from "../battle";
 import { Moves } from "./enums/moves";
@@ -65,7 +65,7 @@ export class MistTag extends ArenaTag {
     super.onAdd(arena);
 
     const source = arena.scene.getPokemonById(this.sourceId);
-    arena.scene.queueMessage(getPokemonMessage(source, `'s team became\nshrowded in mist!`));
+    arena.scene.queueMessage(getPokemonMessage(source, `'s team became\nshrouded in mist!`));
   }
 
   apply(arena: Arena, args: any[]): boolean {
@@ -143,6 +143,31 @@ class AuroraVeilTag extends WeakenMoveScreenTag {
 
   onAdd(arena: Arena): void {
     arena.scene.queueMessage(`Aurora Veil reduced the damage of moves${this.side === ArenaTagSide.PLAYER ? '\non your side' : this.side === ArenaTagSide.ENEMY ? '\non the foe\'s side' : ''}.`);
+  }
+}
+
+class WishTag extends ArenaTag {
+  private battlerIndex: BattlerIndex;
+  private triggerMessage: string;
+  private healHp: number;
+
+  constructor(turnCount: integer, sourceId: integer, side: ArenaTagSide) {
+    super(ArenaTagType.WISH, turnCount, Moves.WISH, sourceId, side);
+  }
+
+  onAdd(arena: Arena): void {
+    const user = arena.scene.getPokemonById(this.sourceId);
+    this.battlerIndex = user.getBattlerIndex();
+    this.triggerMessage = getPokemonMessage(user, '\'s wish\ncame true!');
+    this.healHp = Math.max(Math.floor(user.getMaxHp() / 2), 1);
+  }
+  
+  onRemove(arena: Arena): void {
+    const target = arena.scene.getField()[this.battlerIndex];
+    if (target?.isActive(true)) {
+      arena.scene.queueMessage(this.triggerMessage);
+      arena.scene.unshiftPhase(new PokemonHealPhase(target.scene, target.getBattlerIndex(), this.healHp, null, true, false));
+    }
   }
 }
 
@@ -252,6 +277,7 @@ class SpikesTag extends ArenaTrapTag {
 
         pokemon.scene.queueMessage(getPokemonMessage(pokemon, ' is hurt\nby the spikes!'));
         pokemon.damageAndUpdate(damage, HitResult.OTHER);
+        if (pokemon.turnData) pokemon.turnData.damageTaken += damage;
         return true;
       }
     }
@@ -382,6 +408,7 @@ class StealthRockTag extends ArenaTrapTag {
       const damage = Math.ceil(pokemon.getMaxHp() * damageHpRatio);
       pokemon.scene.queueMessage(`Pointed stones dug into\n${pokemon.name}!`);
       pokemon.damageAndUpdate(damage, HitResult.OTHER);
+      if (pokemon.turnData) pokemon.turnData.damageTaken += damage;
     }
 
     return false;
@@ -470,6 +497,8 @@ export function getArenaTag(tagType: ArenaTagType, turnCount: integer, sourceMov
     case ArenaTagType.FUTURE_SIGHT:
     case ArenaTagType.DOOM_DESIRE:
       return new DelayedAttackTag(tagType, sourceMove, sourceId, targetIndex);
+    case ArenaTagType.WISH:
+      return new WishTag(turnCount, sourceId, side);
     case ArenaTagType.STEALTH_ROCK:
       return new StealthRockTag(sourceId, side);
     case ArenaTagType.STICKY_WEB:

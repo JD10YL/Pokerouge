@@ -383,6 +383,7 @@ export default class PartyUiHandler extends MessageUiHandler {
       }
 
       const slotCount = this.partySlots.length;
+      const battlerCount = this.scene.currentBattle.getBattlerCount();
 
       switch (button) {
         case Button.UP:
@@ -392,14 +393,20 @@ export default class PartyUiHandler extends MessageUiHandler {
           success = this.setCursor(this.cursor < 6 ? this.cursor < slotCount - 1 ? this.cursor + 1 : 6 : 0);
           break;
         case Button.LEFT:
-          if (this.cursor >= this.scene.currentBattle.getBattlerCount() && this.cursor < 6)
+          if (this.cursor >= battlerCount && this.cursor <= 6)
             success = this.setCursor(0);
           break;
         case Button.RIGHT:
-          const battlerCount = this.scene.currentBattle.getBattlerCount();
-          if (slotCount > battlerCount && this.cursor < battlerCount)
-            success = this.setCursor(this.lastCursor < 6 ? this.lastCursor || battlerCount : battlerCount);
+          if (slotCount === battlerCount){
+            success = this.setCursor(6);
           break;
+          } else if (battlerCount >= 2 && slotCount > battlerCount && this.getCursor() === 0 && this.lastCursor === 1){
+            success = this.setCursor(2);
+          break;
+          } else if (slotCount > battlerCount && this.cursor < battlerCount){
+            success = this.setCursor(this.lastCursor < 6 ? this.lastCursor ||  battlerCount : battlerCount);
+          break;
+          }
       }
     }
 
@@ -646,7 +653,11 @@ export default class PartyUiHandler extends MessageUiHandler {
       const option = this.options[this.options.length - (o + 1)];
       let altText = false;
       let optionName: string;
-      if ((this.partyUiMode !== PartyUiMode.REMEMBER_MOVE_MODIFIER && (this.partyUiMode !== PartyUiMode.MODIFIER_TRANSFER || this.transferMode)) || option === PartyOption.CANCEL) {
+      if (option === PartyOption.SCROLL_UP)
+        optionName = '↑';
+      else if (option === PartyOption.SCROLL_DOWN)
+        optionName = '↓';
+      else if ((this.partyUiMode !== PartyUiMode.REMEMBER_MOVE_MODIFIER && (this.partyUiMode !== PartyUiMode.MODIFIER_TRANSFER || this.transferMode)) || option === PartyOption.CANCEL) {
         switch (option) {
           case PartyOption.MOVE_1:
           case PartyOption.MOVE_2:
@@ -662,11 +673,7 @@ export default class PartyUiHandler extends MessageUiHandler {
               optionName = Utils.toReadableString(PartyOption[option]);
             break;
         }
-      } else if (option === PartyOption.SCROLL_UP)
-        optionName = '↑';
-      else if (option === PartyOption.SCROLL_DOWN)
-        optionName = '↓';
-      else if (this.partyUiMode === PartyUiMode.REMEMBER_MOVE_MODIFIER) {
+      } else if (this.partyUiMode === PartyUiMode.REMEMBER_MOVE_MODIFIER) {
         const move = learnableLevelMoves[option];
         optionName = allMoves[move].name;
         altText = !pokemon.getSpeciesForm().getLevelMoves().find(plm => plm[1] === move);
@@ -900,12 +907,23 @@ class PartySlot extends Phaser.GameObjects.Container {
     }
 
     if (this.pokemon.isShiny()) {
-      const shinyStar = this.scene.add.image(0, 0, 'shiny_star_small');
+      const doubleShiny = this.pokemon.isFusion() && this.pokemon.shiny && this.pokemon.fusionShiny;
+
+      const shinyStar = this.scene.add.image(0, 0, `shiny_star_small${doubleShiny ? '_1' : ''}`);
       shinyStar.setOrigin(0, 0);
       shinyStar.setPositionRelative(slotName, -9, 3);
-      shinyStar.setTint(getVariantTint(this.pokemon.getVariant()));
+      shinyStar.setTint(getVariantTint(!doubleShiny ? this.pokemon.getVariant() : this.pokemon.variant));
 
       slotInfoContainer.add(shinyStar);
+
+      if (doubleShiny) {
+        const fusionShinyStar = this.scene.add.image(0, 0, `shiny_star_small_2`);
+        fusionShinyStar.setOrigin(0, 0);
+        fusionShinyStar.setPosition(shinyStar.x, shinyStar.y);
+        fusionShinyStar.setTint(getVariantTint(this.pokemon.fusionVariant));
+  
+        slotInfoContainer.add(fusionShinyStar);
+      }
     }
 
     if (partyUiMode !== PartyUiMode.TM_MODIFIER) {

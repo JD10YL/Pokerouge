@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import BattleScene, { ABILITY_OVERRIDE, AnySound, MOVE_OVERRIDE, OPP_ABILITY_OVERRIDE, OPP_MOVE_OVERRIDE } from '../battle-scene';
+import BattleScene, { AnySound } from '../battle-scene';
 import { Variant, VariantSet, variantColorCache } from '#app/data/variant';
 import { variantData } from '#app/data/variant';
 import BattleInfo, { PlayerBattleInfo, EnemyBattleInfo } from '../ui/battle-info';
@@ -43,6 +43,7 @@ import { Nature, getNatureStatMultiplier } from '../data/nature';
 import { SpeciesFormChange, SpeciesFormChangeActiveTrigger, SpeciesFormChangeMoveLearnedTrigger, SpeciesFormChangePostMoveTrigger, SpeciesFormChangeStatusEffectTrigger } from '../data/pokemon-forms';
 import { TerrainType } from '../data/terrain';
 import { TrainerSlot } from '../data/trainer-config';
+import { ABILITY_OVERRIDE, MOVE_OVERRIDE, OPP_ABILITY_OVERRIDE, OPP_MOVE_OVERRIDE, OPP_SHINY_OVERRIDE, OPP_VARIANT_OVERRIDE } from '../overrides';
 
 export enum FieldPosition {
   CENTER,
@@ -75,6 +76,7 @@ export default abstract class Pokemon extends Phaser.GameObjects.Container {
   public friendship: integer;
   public metLevel: integer;
   public metBiome: Biome | -1;
+  public luck: integer;
   public pauseEvolutions: boolean;
   public pokerus: boolean;
 
@@ -84,6 +86,7 @@ export default abstract class Pokemon extends Phaser.GameObjects.Container {
   public fusionShiny: boolean;
   public fusionVariant: Variant;
   public fusionGender: Gender;
+  public fusionLuck: integer;
 
   private summonDataPrimer: PokemonSummonData;
 
@@ -142,6 +145,7 @@ export default abstract class Pokemon extends Phaser.GameObjects.Container {
       this.status = dataSource.status;
       this.friendship = dataSource.friendship !== undefined ? dataSource.friendship : this.species.baseFriendship;
       this.metLevel = dataSource.metLevel || 5;
+      this.luck = dataSource.luck;
       this.metBiome = dataSource.metBiome;
       this.pauseEvolutions = dataSource.pauseEvolutions;
       this.pokerus = !!dataSource.pokerus;
@@ -151,6 +155,7 @@ export default abstract class Pokemon extends Phaser.GameObjects.Container {
       this.fusionShiny = dataSource.fusionShiny;
       this.fusionVariant = dataSource.fusionVariant || 0;
       this.fusionGender = dataSource.fusionGender;
+      this.fusionLuck = dataSource.fusionLuck;
     } else {
       this.id = Utils.randSeedInt(4294967296);
       this.ivs = ivs || Utils.getIvsFromId(this.id);
@@ -189,6 +194,8 @@ export default abstract class Pokemon extends Phaser.GameObjects.Container {
           this.generateFusionSpecies();
         }
       }
+
+      this.luck = (this.shiny ? this.variant + 1 : 0) + (this.fusionShiny ? this.fusionVariant + 1 : 0);
     }
 
     this.generateName();
@@ -275,7 +282,7 @@ export default abstract class Pokemon extends Phaser.GameObjects.Container {
   loadAssets(ignoreOverride: boolean = true): Promise<void> {
     return new Promise(resolve => {
       const moveIds = this.getMoveset().map(m => m.getMove().id);
-      Promise.allSettled(moveIds.map(m => initMoveAnim(m)))
+      Promise.allSettled(moveIds.map(m => initMoveAnim(this.scene, m)))
         .then(() => {
           loadMoveAnimAssets(this.scene, moveIds);
           this.getSpeciesForm().loadAssets(this.scene, this.getGender() === Gender.FEMALE, this.formIndex, this.shiny, this.variant);
@@ -309,15 +316,16 @@ export default abstract class Pokemon extends Phaser.GameObjects.Container {
             if (this.shiny) {
               const populateVariantColors = (key: string, back: boolean = false): Promise<void> => {
                 return new Promise(resolve => {
-                  const battleSpritePath = this.getBattleSpriteAtlasPath(back, ignoreOverride);
+                  const battleSpritePath = this.getBattleSpriteAtlasPath(back, ignoreOverride).replace('variant/', '').replace(/_[1-3]$/, '');
                   let variantSet: VariantSet;
                   let config = variantData;
+                  const useExpSprite = this.scene.experimentalSprites && this.scene.hasExpSprite(this.getBattleSpriteKey(back, ignoreOverride));
                   battleSpritePath.split('/').map(p => config ? config = config[p] : null);
                   variantSet = config as VariantSet;
                   if (variantSet && variantSet[this.variant] === 1) {
                     if (variantColorCache.hasOwnProperty(key))
                       return resolve();
-                    fetch(`./images/pokemon/variant/${battleSpritePath}.json`).then(res => res.json()).then(c => {
+                    this.scene.cachedFetch(`./images/pokemon/variant/${useExpSprite ? 'exp/' : ''}${battleSpritePath}.json`).then(res => res.json()).then(c => {
                       variantColorCache[key] = c;
                       resolve();
                     });
@@ -326,9 +334,9 @@ export default abstract class Pokemon extends Phaser.GameObjects.Container {
                 });
               };
               if (this.isPlayer())
-                Promise.all([ populateVariantColors(this.getBattleSpriteKey()), populateVariantColors(this.getBattleSpriteKey(true)) ]).then(() => updateFusionPaletteAndResolve());
+                Promise.all([ populateVariantColors(this.getBattleSpriteKey(false)), populateVariantColors(this.getBattleSpriteKey(true), true) ]).then(() => updateFusionPaletteAndResolve());
               else
-                populateVariantColors(this.getBattleSpriteKey()).then(() => updateFusionPaletteAndResolve());
+                populateVariantColors(this.getBattleSpriteKey(false)).then(() => updateFusionPaletteAndResolve());
             } else
               updateFusionPaletteAndResolve();
           });
@@ -650,7 +658,7 @@ export default abstract class Pokemon extends Phaser.GameObjects.Container {
   getHpRatio(precise: boolean = false): number {
     return precise
       ? this.hp / this.getMaxHp()
-      : ((this.hp / this.getMaxHp()) * 100) / 100;
+      : Math.round((this.hp / this.getMaxHp()) * 100) / 100;
   }
 
   generateGender(): void {
@@ -683,6 +691,10 @@ export default abstract class Pokemon extends Phaser.GameObjects.Container {
 
   getVariant(): Variant {
     return !this.isFusion() ? this.variant : Math.max(this.variant, this.fusionVariant) as Variant;
+  }
+
+  getLuck(): integer {
+    return this.luck + (this.isFusion() ? this.fusionLuck : 0);
   }
 
   isFusion(): boolean {
@@ -986,11 +998,8 @@ export default abstract class Pokemon extends Phaser.GameObjects.Container {
 
     let shinyThreshold = new Utils.IntegerHolder(32);
     if (thresholdOverride === undefined) {
-      if (!this.hasTrainer()) {
-        if (new Date() < new Date('4/22/2024'))
-          shinyThreshold.value *= 3;
+      if (!this.hasTrainer())
         this.scene.applyModifiers(ShinyRateBoosterModifier, true, shinyThreshold);
-      }
     } else
       shinyThreshold.value = thresholdOverride;
 
@@ -1050,6 +1059,7 @@ export default abstract class Pokemon extends Phaser.GameObjects.Container {
     }
 
     this.fusionFormIndex = this.scene.getSpeciesFormIndex(this.fusionSpecies, this.fusionGender, this.getNature(), true);
+    this.fusionLuck = this.luck;
 
     this.generateName();
   }
@@ -1059,7 +1069,9 @@ export default abstract class Pokemon extends Phaser.GameObjects.Container {
     this.fusionFormIndex = 0;
     this.fusionAbilityIndex = 0;
     this.fusionShiny = false;
+    this.fusionVariant = 0;
     this.fusionGender = 0;
+    this.fusionLuck = 0;
 
     this.generateName();
     this.calculateStats();
@@ -1165,6 +1177,10 @@ export default abstract class Pokemon extends Phaser.GameObjects.Container {
 
   updateInfo(instant?: boolean): Promise<void> {
     return this.battleInfo.updateInfo(this, instant);
+  }
+
+  toggleStats(visible: boolean): void {
+    this.battleInfo.toggleStats(visible);
   }
 
   addExp(exp: integer) {
@@ -1392,6 +1408,7 @@ export default abstract class Pokemon extends Phaser.GameObjects.Container {
 
             const oneHitKo = result === HitResult.ONE_HIT_KO;
             damage.value = this.damageAndUpdate(damage.value, result as DamageResult, isCritical, oneHitKo, oneHitKo);
+            this.turnData.damageTaken += damage.value;
             if (isCritical)
               this.scene.queueMessage('A critical hit!');
             this.scene.setPhaseQueueSplice();
@@ -1489,6 +1506,11 @@ export default abstract class Pokemon extends Phaser.GameObjects.Container {
 
   isBossImmune(): boolean {
     return this.isBoss();
+  }
+
+  isMax(): boolean {
+    const maxForms = [SpeciesFormKey.GIGANTAMAX, SpeciesFormKey.GIGANTAMAX_RAPID, SpeciesFormKey.GIGANTAMAX_SINGLE, SpeciesFormKey.ETERNAMAX] as string[];
+    return maxForms.includes(this.getFormKey()) || maxForms.includes(this.getFusionFormKey());
   }
 
   addTag(tagType: BattlerTagType, turnCount: integer = 0, sourceMove?: Moves, sourceId?: integer): boolean {
@@ -1602,6 +1624,7 @@ export default abstract class Pokemon extends Phaser.GameObjects.Container {
       this.summonData.tags.push(tag);
     if (this instanceof PlayerPokemon && source.summonData.battleStats.find(bs => bs === 6))
       this.scene.validateAchv(achvs.TRANSFER_MAX_BATTLE_STAT);
+    this.updateInfo();
   }
 
   getMoveHistory(): TurnMove[] {
@@ -1902,6 +1925,7 @@ export default abstract class Pokemon extends Phaser.GameObjects.Container {
       }
       this.summonDataPrimer = null;
     }
+    this.updateInfo();
   }
 
   resetBattleData(): void {
@@ -2095,7 +2119,6 @@ export default abstract class Pokemon extends Phaser.GameObjects.Container {
         if (variantColors) {
           const color = Utils.rgbaToInt([r, g, b, a]);
           if (variantColorSet.has(color)) {
-            console.log(color);
             const mappedPixel = variantColorSet.get(color);
             [ r, g, b, a ] = mappedPixel;
           }
@@ -2314,7 +2337,8 @@ export class PlayerPokemon extends Pokemon {
   switchOut(batonPass: boolean, removeFromField: boolean = false): Promise<void> {
     return new Promise(resolve => {
       this.resetTurnData();
-      this.resetSummonData();
+      if (!batonPass)
+        this.resetSummonData();
       this.hideInfo();
       this.setVisible(false);
       
@@ -2409,6 +2433,7 @@ export class PlayerPokemon extends Pokemon {
         newPokemon.fusionShiny = this.fusionShiny;
         newPokemon.fusionVariant = this.fusionVariant;
         newPokemon.fusionGender = this.fusionGender;
+        newPokemon.fusionLuck = this.fusionLuck;
         this.scene.getParty().push(newPokemon);
         newPokemon.evolve(newEvolution);
         const modifiers = this.scene.findModifiers(m => m instanceof PokemonHeldItemModifier
@@ -2466,8 +2491,9 @@ export class PlayerPokemon extends Pokemon {
       this.fusionFormIndex = pokemon.formIndex;
       this.fusionAbilityIndex = pokemon.abilityIndex;
       this.fusionShiny = pokemon.shiny;
-      this.fusionVariant = pokemon.fusionVariant;
+      this.fusionVariant = pokemon.variant;
       this.fusionGender = pokemon.gender;
+      this.fusionLuck = pokemon.luck;
 
       this.scene.validateAchv(achvs.SPLICE);
       this.scene.gameData.gameStats.pokemonFused++;
@@ -2527,9 +2553,17 @@ export class EnemyPokemon extends Pokemon {
       this.generateAndPopulateMoveset();
 
       this.trySetShiny();
-
-      if (this.shiny)
+      if (OPP_SHINY_OVERRIDE) {
+        this.shiny = true;
+        this.initShinySparkle();
+      }
+      if (this.shiny) {
         this.variant = this.generateVariant();
+        if (OPP_VARIANT_OVERRIDE)
+          this.variant = OPP_VARIANT_OVERRIDE;
+      }
+
+      this.luck = (this.shiny ? this.variant + 1 : 0) + (this.fusionShiny ? this.fusionVariant + 1 : 0);
 
       let prevolution: Species;
       let speciesId = species.speciesId;
@@ -2972,6 +3006,7 @@ export class PokemonTurnData {
   public hitCount: integer;
   public hitsLeft: integer;
   public damageDealt: integer = 0;
+  public damageTaken: integer = 0;
   public attacksReceived: AttackMoveResult[] = [];
 }
 
